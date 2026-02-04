@@ -16,12 +16,13 @@ class AppLockScreen extends StatefulWidget {
   State<AppLockScreen> createState() => _AppLockScreenState();
 }
 
-class _AppLockScreenState extends State<AppLockScreen> {
+class _AppLockScreenState extends State<AppLockScreen> with WidgetsBindingObserver {
   late AppLockCubit _cubit;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     // Create dependencies
     final repository = AppLockRepositoryImpl(DatabaseService.instance);
@@ -36,8 +37,17 @@ class _AppLockScreenState extends State<AppLockScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cubit.close();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Refresh permissions when returning from settings
+    if (state == AppLifecycleState.resumed) {
+      _cubit.refreshPermissions();
+    }
   }
 
   @override
@@ -131,6 +141,12 @@ class _AppLockScreenState extends State<AppLockScreen> {
       onRefresh: () => _cubit.refresh(),
       child: CustomScrollView(
         slivers: [
+          // Permission setup card (if needed)
+          if (state.needsPermissionSetup)
+            SliverToBoxAdapter(
+              child: _buildPermissionCard(context, state),
+            ),
+
           // Status card
           SliverToBoxAdapter(
             child: _buildStatusCard(context, state),
@@ -177,6 +193,65 @@ class _AppLockScreenState extends State<AppLockScreen> {
             child: SizedBox(height: 80),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionCard(BuildContext context, AppLockReady state) {
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: const EdgeInsets.all(16),
+      color: theme.colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: theme.colorScheme.error,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Setup Required',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'App locking requires special permissions to detect and block protected apps.',
+              style: TextStyle(color: theme.colorScheme.onErrorContainer),
+            ),
+            const SizedBox(height: 16),
+
+            // Accessibility Service
+            _PermissionRow(
+              icon: Icons.accessibility_new,
+              title: 'Accessibility Service',
+              description: 'Detects when protected apps are opened',
+              isGranted: state.accessibilityEnabled,
+              onTap: () => _cubit.openAccessibilitySettings(),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Overlay Permission
+            _PermissionRow(
+              icon: Icons.layers,
+              title: 'Display Over Apps',
+              description: 'Shows lock screen over protected apps',
+              isGranted: state.overlayPermissionGranted,
+              onTap: () => _cubit.requestOverlayPermission(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -272,11 +347,18 @@ class _AppLockScreenState extends State<AppLockScreen> {
     final theme = Theme.of(context);
 
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: theme.colorScheme.errorContainer,
-        child: Icon(
-          app.iconData,
-          color: theme.colorScheme.error,
+      leading: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: app.buildIcon(
+            size: 32,
+            color: theme.colorScheme.error,
+          ),
         ),
       ),
       title: Text(app.displayName),
@@ -290,15 +372,24 @@ class _AppLockScreenState extends State<AppLockScreen> {
     final theme = Theme.of(context);
 
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: app.isProtected
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surfaceContainerHighest,
-        child: Icon(
-          app.iconData,
+      leading: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
           color: app.isProtected
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurfaceVariant,
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: app.buildIcon(
+            size: 32,
+            color: app.isRealApp
+                ? null // Use actual icon colors for real apps
+                : (app.isProtected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant),
+          ),
         ),
       ),
       title: Text(app.displayName),
@@ -565,6 +656,71 @@ class _StatItem extends StatelessWidget {
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
+    );
+  }
+}
+
+class _PermissionRow extends StatelessWidget {
+  const _PermissionRow({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.isGranted,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final bool isGranted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return InkWell(
+      onTap: isGranted ? null : onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: isGranted ? Colors.green : theme.colorScheme.onErrorContainer,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                  ),
+                  Text(
+                    description,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onErrorContainer.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isGranted)
+              const Icon(Icons.check_circle, color: Colors.green)
+            else
+              TextButton(
+                onPressed: onTap,
+                child: const Text('Enable'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

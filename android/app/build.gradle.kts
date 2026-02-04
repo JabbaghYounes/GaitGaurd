@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Encrypted SharedPreferences for secure app lock state storage
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+}

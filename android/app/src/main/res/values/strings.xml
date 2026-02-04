@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GaitGuard</string>
+    <string name="accessibility_service_label">GaitGuard App Lock</string>
+    <string name="accessibility_service_description">GaitGuard uses this service to detect when protected apps are opened and require gait authentication before allowing access. This helps keep your sensitive apps secure.</string>
+</resources>

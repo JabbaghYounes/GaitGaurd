@@ -25,7 +25,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createSchema(db);
       },
@@ -41,6 +41,9 @@ class DatabaseService {
         }
         if (oldVersion < 5) {
           await _addAppLockTables(db);
+        }
+        if (oldVersion < 6) {
+          await _addRealAppColumns(db);
         }
       },
     );
@@ -192,10 +195,12 @@ class DatabaseService {
         package_name TEXT NOT NULL,
         display_name TEXT NOT NULL,
         icon_code_point INTEGER,
+        icon_base64 TEXT,
         is_protected INTEGER DEFAULT 0,
         is_locked INTEGER DEFAULT 0,
         last_unlock_time TEXT,
         lock_count INTEGER DEFAULT 0,
+        is_real_app INTEGER DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(user_id, package_name),
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -225,6 +230,19 @@ class DatabaseService {
     await db.execute('CREATE INDEX idx_app_lock_sessions_user_id ON app_lock_sessions(user_id)');
     await db.execute('CREATE INDEX idx_app_lock_sessions_package ON app_lock_sessions(package_name)');
     await db.execute('CREATE INDEX idx_app_lock_sessions_status ON app_lock_sessions(lock_status)');
+  }
+
+  /// Migration to add real app support columns
+  Future<void> _addRealAppColumns(Database db) async {
+    // Add icon_base64 column for storing real app icons
+    await db.execute('''
+      ALTER TABLE protected_apps ADD COLUMN icon_base64 TEXT
+    ''');
+
+    // Add is_real_app flag to distinguish real apps from mock
+    await db.execute('''
+      ALTER TABLE protected_apps ADD COLUMN is_real_app INTEGER DEFAULT 0
+    ''');
   }
 }
 

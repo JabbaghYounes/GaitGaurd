@@ -15,6 +15,9 @@ class AppLockCubit extends Cubit<AppLockState> {
   StreamSubscription<AppLockEvent>? _eventSubscription;
   int? _userId;
 
+  /// Check if native app detection is supported
+  bool get isNativeSupported => _service.isNativeSupported;
+
   /// Initialize the cubit with user ID
   Future<void> initialize(int userId) async {
     _userId = userId;
@@ -55,11 +58,12 @@ class AppLockCubit extends Cubit<AppLockState> {
         ),
       );
 
-      // Toggle protection
+      // Toggle protection (pass app info to preserve icon data)
       await _service.setAppProtection(
         _userId!,
         packageName,
         !app.isProtected,
+        appInfo: app,
       );
 
       // Reload apps to get updated state
@@ -205,15 +209,55 @@ class AppLockCubit extends Cubit<AppLockState> {
       final lockedApps = await _service.getLockedApps(userId);
       final stats = await _service.getLockStats(userId);
 
+      // Get permission status on Android
+      final isNativeSupported = _service.isNativeSupported;
+      final accessibilityEnabled = isNativeSupported
+          ? await _service.isAccessibilityServiceEnabled()
+          : false;
+      final overlayPermissionGranted = isNativeSupported
+          ? await _service.isOverlayPermissionGranted()
+          : false;
+
       emit(AppLockReady(
         userId: userId,
         availableApps: availableApps,
         protectedApps: protectedApps,
         lockedApps: lockedApps,
         stats: stats,
+        isNativeSupported: isNativeSupported,
+        accessibilityEnabled: accessibilityEnabled,
+        overlayPermissionGranted: overlayPermissionGranted,
       ));
     } catch (e) {
       emit(AppLockError(message: 'Failed to load apps: $e', error: e));
+    }
+  }
+
+  /// Open accessibility settings for user to enable the service
+  Future<void> openAccessibilitySettings() async {
+    await _service.openAccessibilitySettings();
+  }
+
+  /// Request overlay permission
+  Future<void> requestOverlayPermission() async {
+    await _service.requestOverlayPermission();
+  }
+
+  /// Check and refresh permission status
+  Future<void> refreshPermissions() async {
+    if (_userId == null) return;
+
+    final currentState = state;
+    if (currentState is AppLockReady) {
+      final accessibilityEnabled =
+          await _service.isAccessibilityServiceEnabled();
+      final overlayPermissionGranted =
+          await _service.isOverlayPermissionGranted();
+
+      emit(currentState.copyWith(
+        accessibilityEnabled: accessibilityEnabled,
+        overlayPermissionGranted: overlayPermissionGranted,
+      ));
     }
   }
 

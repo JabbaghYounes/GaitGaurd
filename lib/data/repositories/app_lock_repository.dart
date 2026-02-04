@@ -14,7 +14,7 @@ abstract class AppLockRepository {
   Future<ProtectedApp> saveProtectedApp(int userId, ProtectedApp app);
 
   /// Update app protection status
-  Future<void> setAppProtected(int userId, String packageName, bool isProtected);
+  Future<void> setAppProtected(int userId, String packageName, bool isProtected, {ProtectedApp? appInfo});
 
   /// Update app lock status
   Future<void> setAppLocked(int userId, String packageName, bool isLocked);
@@ -109,37 +109,55 @@ class AppLockRepositoryImpl implements AppLockRepository {
 
   @override
   Future<void> setAppProtected(
-      int userId, String packageName, bool isProtected) async {
+      int userId, String packageName, bool isProtected, {ProtectedApp? appInfo}) async {
     final db = await _databaseService.database;
 
     // Check if app exists
     final existing = await getProtectedApp(userId, packageName);
 
     if (existing != null) {
+      // Update existing app
+      final updateData = <String, dynamic>{
+        'is_protected': isProtected ? 1 : 0,
+      };
+
+      // Update icon if provided
+      if (appInfo?.iconBase64 != null) {
+        updateData['icon_base64'] = appInfo!.iconBase64;
+        updateData['is_real_app'] = 1;
+      }
+
       await db.update(
         'protected_apps',
-        {'is_protected': isProtected ? 1 : 0},
+        updateData,
         where: 'user_id = ? AND package_name = ?',
         whereArgs: [userId, packageName],
       );
     } else {
-      // Find in mock apps and insert
-      final mockApp = ProtectedApp.mockApps.firstWhere(
-        (app) => app.packageName == packageName,
-        orElse: () => ProtectedApp(
-          packageName: packageName,
-          displayName: packageName,
-        ),
-      );
+      // Get app info from provided appInfo, mock apps, or create minimal entry
+      final ProtectedApp sourceApp;
+      if (appInfo != null) {
+        sourceApp = appInfo;
+      } else {
+        sourceApp = ProtectedApp.mockApps.firstWhere(
+          (app) => app.packageName == packageName,
+          orElse: () => ProtectedApp(
+            packageName: packageName,
+            displayName: packageName,
+          ),
+        );
+      }
 
       await db.insert('protected_apps', {
         'user_id': userId,
         'package_name': packageName,
-        'display_name': mockApp.displayName,
-        'icon_code_point': mockApp.iconData.codePoint,
+        'display_name': sourceApp.displayName,
+        'icon_code_point': sourceApp.iconData.codePoint,
+        'icon_base64': sourceApp.iconBase64,
         'is_protected': isProtected ? 1 : 0,
         'is_locked': 0,
         'lock_count': 0,
+        'is_real_app': sourceApp.isRealApp ? 1 : 0,
         'created_at': DateTime.now().toIso8601String(),
       });
     }

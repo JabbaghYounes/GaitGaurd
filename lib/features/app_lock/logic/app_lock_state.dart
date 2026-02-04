@@ -44,6 +44,9 @@ class AppLockReady extends AppLockState {
     required this.protectedApps,
     required this.lockedApps,
     this.stats,
+    this.isNativeSupported = false,
+    this.accessibilityEnabled = false,
+    this.overlayPermissionGranted = false,
   });
 
   final int userId;
@@ -51,6 +54,23 @@ class AppLockReady extends AppLockState {
   final List<ProtectedApp> protectedApps;
   final List<ProtectedApp> lockedApps;
   final Map<String, dynamic>? stats;
+
+  /// Whether native app detection is supported (Android only)
+  final bool isNativeSupported;
+
+  /// Whether accessibility service is enabled
+  final bool accessibilityEnabled;
+
+  /// Whether overlay permission is granted
+  final bool overlayPermissionGranted;
+
+  /// Check if all required permissions are granted for app locking
+  bool get isFullyConfigured =>
+      !isNativeSupported || (accessibilityEnabled && overlayPermissionGranted);
+
+  /// Check if permissions need to be configured
+  bool get needsPermissionSetup =>
+      isNativeSupported && (!accessibilityEnabled || !overlayPermissionGranted);
 
   /// Whether any apps are currently locked
   bool get hasLockedApps => lockedApps.isNotEmpty;
@@ -70,6 +90,9 @@ class AppLockReady extends AppLockState {
     List<ProtectedApp>? protectedApps,
     List<ProtectedApp>? lockedApps,
     Map<String, dynamic>? stats,
+    bool? isNativeSupported,
+    bool? accessibilityEnabled,
+    bool? overlayPermissionGranted,
   }) {
     return AppLockReady(
       userId: userId ?? this.userId,
@@ -77,6 +100,10 @@ class AppLockReady extends AppLockState {
       protectedApps: protectedApps ?? this.protectedApps,
       lockedApps: lockedApps ?? this.lockedApps,
       stats: stats ?? this.stats,
+      isNativeSupported: isNativeSupported ?? this.isNativeSupported,
+      accessibilityEnabled: accessibilityEnabled ?? this.accessibilityEnabled,
+      overlayPermissionGranted:
+          overlayPermissionGranted ?? this.overlayPermissionGranted,
     );
   }
 
@@ -85,6 +112,9 @@ class AppLockReady extends AppLockState {
       identical(this, other) ||
       other is AppLockReady &&
           other.userId == userId &&
+          other.isNativeSupported == isNativeSupported &&
+          other.accessibilityEnabled == accessibilityEnabled &&
+          other.overlayPermissionGranted == overlayPermissionGranted &&
           listEquals(other.availableApps, availableApps) &&
           listEquals(other.protectedApps, protectedApps) &&
           listEquals(other.lockedApps, lockedApps);
@@ -95,6 +125,9 @@ class AppLockReady extends AppLockState {
         availableApps.length,
         protectedApps.length,
         lockedApps.length,
+        isNativeSupported,
+        accessibilityEnabled,
+        overlayPermissionGranted,
       );
 }
 

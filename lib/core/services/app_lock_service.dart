@@ -4,21 +4,25 @@ import '../../data/models/protected_app.dart';
 import '../../data/models/app_lock_session.dart';
 import '../../data/models/authentication_decision.dart';
 import '../../data/repositories/app_lock_repository.dart';
+import 'native_app_service.dart';
 
 /// Service for managing app locking based on gait authentication.
 ///
 /// Handles:
-/// - Listing available apps (simulated)
+/// - Listing available apps (real installed apps on Android, mock on other platforms)
 /// - Managing app protection settings
+/// - Syncing protection state with native Android side
 /// - Locking apps on gait authentication failure
 /// - Unlocking apps with successful gait authentication
 class AppLockService {
   AppLockService({
     required this.repository,
+    NativeAppService? nativeService,
     this.unlockThreshold = 0.7,
-  });
+  }) : _nativeService = nativeService ?? NativeAppService.instance;
 
   final AppLockRepository repository;
+  final NativeAppService _nativeService;
 
   /// Minimum confidence required to unlock an app
   final double unlockThreshold;
@@ -29,37 +33,131 @@ class AppLockService {
   /// Stream of lock events for UI updates
   Stream<AppLockEvent> get lockEvents => _lockEventController.stream;
 
-  /// Get all available apps (mock + user's saved apps merged)
+  /// Cache for installed apps (to avoid repeated native calls)
+  List<ProtectedApp>? _installedAppsCache;
+  DateTime? _cacheTime;
+  static const _cacheDuration = Duration(minutes: 5);
+
+  /// Initialize the service
+  void initialize() {
+    _nativeService.initialize();
+  }
+
+  /// Check if native app detection is available
+  bool get isNativeSupported => _nativeService.isSupported;
+
+  /// Get service status from native side
+  Future<NativeServiceStatus> getServiceStatus() {
+    return _nativeService.getServiceStatus();
+  }
+
+  /// Check if accessibility service is enabled
+  Future<bool> isAccessibilityServiceEnabled() {
+    return _nativeService.isAccessibilityServiceEnabled();
+  }
+
+  /// Open accessibility settings for user to enable service
+  Future<void> openAccessibilitySettings() {
+    return _nativeService.openAccessibilitySettings();
+  }
+
+  /// Check if overlay permission is granted
+  Future<bool> isOverlayPermissionGranted() {
+    return _nativeService.isOverlayPermissionGranted();
+  }
+
+  /// Request overlay permission
+  Future<void> requestOverlayPermission() {
+    return _nativeService.requestOverlayPermission();
+  }
+
+  /// Get all available apps (real installed apps on Android, merged with saved preferences)
   Future<List<ProtectedApp>> getAvailableApps(int userId) async {
     try {
-      // Get user's saved app preferences
+      // Get user's saved app preferences from database
       final savedApps = await repository.getProtectedApps(userId);
-      final savedPackages = savedApps.map((a) => a.packageName).toSet();
+      final savedByPackage = {for (var a in savedApps) a.packageName: a};
 
-      // Merge with mock apps
-      final result = <ProtectedApp>[];
+      // Try to get real installed apps on Android
+      final installedApps = await _getInstalledApps();
 
-      // Add mock apps with saved preferences if they exist
-      for (final mockApp in ProtectedApp.mockApps) {
-        final savedApp = savedApps.firstWhere(
-          (a) => a.packageName == mockApp.packageName,
-          orElse: () => mockApp,
-        );
-        result.add(savedApp);
-      }
+      if (installedApps.isNotEmpty) {
+        // Merge real apps with saved preferences
+        final result = <ProtectedApp>[];
 
-      // Add any user-saved apps not in mock list
-      for (final savedApp in savedApps) {
-        if (!ProtectedApp.mockApps
-            .any((m) => m.packageName == savedApp.packageName)) {
-          result.add(savedApp);
+        for (final installed in installedApps) {
+          final saved = savedByPackage[installed.packageName];
+          if (saved != null) {
+            // Use saved preferences with updated icon
+            result.add(saved.copyWith(
+              iconBase64: installed.iconBase64,
+              displayName: installed.displayName,
+              isRealApp: true,
+            ));
+          } else {
+            // New app, not yet in database
+            result.add(installed);
+          }
         }
+
+        return result;
       }
 
-      return result;
+      // Fallback to mock apps if native detection unavailable
+      return _getMergedMockApps(savedApps);
     } catch (e) {
       throw AppLockException('Failed to get available apps', e);
     }
+  }
+
+  /// Get installed apps from native side (with caching)
+  Future<List<ProtectedApp>> _getInstalledApps() async {
+    // Check cache
+    if (_installedAppsCache != null &&
+        _cacheTime != null &&
+        DateTime.now().difference(_cacheTime!) < _cacheDuration) {
+      return _installedAppsCache!;
+    }
+
+    // Fetch from native
+    final nativeApps = await _nativeService.getInstalledApps();
+    if (nativeApps.isEmpty) return [];
+
+    // Convert to ProtectedApp
+    _installedAppsCache = nativeApps
+        .map((app) => ProtectedApp.fromInstalledApp(app))
+        .toList();
+    _cacheTime = DateTime.now();
+
+    return _installedAppsCache!;
+  }
+
+  /// Merge mock apps with saved preferences (fallback when native unavailable)
+  List<ProtectedApp> _getMergedMockApps(List<ProtectedApp> savedApps) {
+    final savedByPackage = {for (var a in savedApps) a.packageName: a};
+    final result = <ProtectedApp>[];
+
+    // Add mock apps with saved preferences
+    for (final mockApp in ProtectedApp.mockApps) {
+      final saved = savedByPackage[mockApp.packageName];
+      result.add(saved ?? mockApp);
+    }
+
+    // Add any saved apps not in mock list
+    for (final saved in savedApps) {
+      if (!ProtectedApp.mockApps.any((m) => m.packageName == saved.packageName)) {
+        result.add(saved);
+      }
+    }
+
+    return result;
+  }
+
+  /// Refresh the installed apps cache
+  Future<void> refreshInstalledApps() async {
+    _installedAppsCache = null;
+    _cacheTime = null;
+    await _getInstalledApps();
   }
 
   /// Get only the protected apps
@@ -86,10 +184,19 @@ class AppLockService {
   Future<void> setAppProtection(
     int userId,
     String packageName,
-    bool isProtected,
-  ) async {
+    bool isProtected, {
+    ProtectedApp? appInfo,
+  }) async {
     try {
-      await repository.setAppProtected(userId, packageName, isProtected);
+      await repository.setAppProtected(
+        userId,
+        packageName,
+        isProtected,
+        appInfo: appInfo,
+      );
+
+      // Sync with native side
+      await _syncProtectedAppsToNative(userId);
 
       _lockEventController.add(AppLockEvent(
         type: isProtected
@@ -103,10 +210,29 @@ class AppLockService {
     }
   }
 
+  /// Sync protected apps list to native Android side
+  Future<void> _syncProtectedAppsToNative(int userId) async {
+    if (!_nativeService.isSupported) return;
+
+    try {
+      final protectedApps = await repository.getProtectedApps(userId);
+      final packageNames = protectedApps
+          .where((a) => a.isProtected)
+          .map((a) => a.packageName)
+          .toList();
+      await _nativeService.setProtectedApps(packageNames);
+    } catch (e) {
+      // Don't fail the main operation if sync fails
+    }
+  }
+
   /// Lock all protected apps (called on gait authentication failure)
   Future<void> lockAllProtectedApps(int userId) async {
     try {
       await repository.lockAllProtectedApps(userId);
+
+      // Also lock on native side
+      await _nativeService.lockAllApps();
 
       _lockEventController.add(AppLockEvent(
         type: AppLockEventType.allAppsLocked,
@@ -175,6 +301,9 @@ class AppLockService {
         session = session.unlock(confidence);
         await repository.updateLockSession(session);
         await repository.setAppLocked(userId, packageName, false);
+
+        // Also unlock on native side
+        await _nativeService.unlockApp(packageName);
 
         _lockEventController.add(AppLockEvent(
           type: AppLockEventType.appUnlocked,
@@ -263,6 +392,7 @@ class AppLockService {
   /// Dispose resources
   void dispose() {
     _lockEventController.close();
+    _nativeService.dispose();
   }
 }
 

@@ -1,10 +1,15 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+
+import '../../core/services/native_app_service.dart';
 
 /// Represents an app that can be protected by gait-based locking.
 ///
-/// Since platform APIs for listing installed apps are limited (iOS prohibits it,
-/// Android requires special permissions), this model supports both real apps
-/// (if available) and simulated/mock apps for demonstration.
+/// Supports both:
+/// - Real apps detected from Android with base64 encoded icons
+/// - Mock apps with Material Icons for fallback/demo
 @immutable
 class ProtectedApp {
   const ProtectedApp({
@@ -12,13 +17,15 @@ class ProtectedApp {
     required this.packageName,
     required this.displayName,
     this.iconData = Icons.apps,
+    this.iconBase64,
     this.isProtected = false,
     this.isLocked = false,
     this.lastUnlockTime,
     this.lockCount = 0,
+    this.isRealApp = false,
   });
 
-  /// Database ID (null for mock apps not yet persisted)
+  /// Database ID (null for apps not yet persisted)
   final int? id;
 
   /// Unique package identifier (e.g., 'com.bank.app')
@@ -27,8 +34,11 @@ class ProtectedApp {
   /// User-friendly display name
   final String displayName;
 
-  /// Icon to display (using IconData for simplicity)
+  /// Fallback icon to display (using IconData)
   final IconData iconData;
+
+  /// Base64 encoded app icon from native Android (for real apps)
+  final String? iconBase64;
 
   /// Whether user has enabled protection for this app
   final bool isProtected;
@@ -42,26 +52,79 @@ class ProtectedApp {
   /// Number of times app has been locked
   final int lockCount;
 
+  /// Whether this is a real installed app (vs mock)
+  final bool isRealApp;
+
+  /// Check if app has a real icon (base64 encoded)
+  bool get hasRealIcon => iconBase64 != null && iconBase64!.isNotEmpty;
+
+  /// Get decoded icon bytes (for Image.memory)
+  Uint8List? get iconBytes {
+    if (!hasRealIcon) return null;
+    try {
+      return base64Decode(iconBase64!);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Build icon widget (uses real icon if available, fallback to IconData)
+  Widget buildIcon({double size = 40, Color? color}) {
+    final bytes = iconBytes;
+    if (bytes != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          bytes,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Icon(iconData, size: size, color: color),
+        ),
+      );
+    }
+    return Icon(iconData, size: size, color: color);
+  }
+
   /// Create a copy with updated fields
   ProtectedApp copyWith({
     int? id,
     String? packageName,
     String? displayName,
     IconData? iconData,
+    String? iconBase64,
     bool? isProtected,
     bool? isLocked,
     DateTime? lastUnlockTime,
     int? lockCount,
+    bool? isRealApp,
   }) {
     return ProtectedApp(
       id: id ?? this.id,
       packageName: packageName ?? this.packageName,
       displayName: displayName ?? this.displayName,
       iconData: iconData ?? this.iconData,
+      iconBase64: iconBase64 ?? this.iconBase64,
       isProtected: isProtected ?? this.isProtected,
       isLocked: isLocked ?? this.isLocked,
       lastUnlockTime: lastUnlockTime ?? this.lastUnlockTime,
       lockCount: lockCount ?? this.lockCount,
+      isRealApp: isRealApp ?? this.isRealApp,
+    );
+  }
+
+  /// Create from native InstalledApp
+  factory ProtectedApp.fromInstalledApp(InstalledApp app, {
+    bool isProtected = false,
+    bool isLocked = false,
+  }) {
+    return ProtectedApp(
+      packageName: app.packageName,
+      displayName: app.displayName,
+      iconBase64: app.iconBase64,
+      isProtected: isProtected,
+      isLocked: isLocked,
+      isRealApp: true,
     );
   }
 
@@ -72,10 +135,12 @@ class ProtectedApp {
       'package_name': packageName,
       'display_name': displayName,
       'icon_code_point': iconData.codePoint,
+      'icon_base64': iconBase64,
       'is_protected': isProtected ? 1 : 0,
       'is_locked': isLocked ? 1 : 0,
       'last_unlock_time': lastUnlockTime?.toIso8601String(),
       'lock_count': lockCount,
+      'is_real_app': isRealApp ? 1 : 0,
     };
   }
 
@@ -89,16 +154,18 @@ class ProtectedApp {
         map['icon_code_point'] as int? ?? Icons.apps.codePoint,
         fontFamily: 'MaterialIcons',
       ),
+      iconBase64: map['icon_base64'] as String?,
       isProtected: (map['is_protected'] as int?) == 1,
       isLocked: (map['is_locked'] as int?) == 1,
       lastUnlockTime: map['last_unlock_time'] != null
           ? DateTime.parse(map['last_unlock_time'] as String)
           : null,
       lockCount: map['lock_count'] as int? ?? 0,
+      isRealApp: (map['is_real_app'] as int?) == 1,
     );
   }
 
-  /// Mock apps for simulation (since we can't list real installed apps)
+  /// Mock apps for fallback when native app detection unavailable
   static List<ProtectedApp> get mockApps => const [
         ProtectedApp(
           packageName: 'com.bank.app',
@@ -157,6 +224,6 @@ class ProtectedApp {
   @override
   String toString() {
     return 'ProtectedApp(packageName: $packageName, displayName: $displayName, '
-        'isProtected: $isProtected, isLocked: $isLocked)';
+        'isProtected: $isProtected, isLocked: $isLocked, isRealApp: $isRealApp)';
   }
 }
