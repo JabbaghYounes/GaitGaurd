@@ -187,12 +187,4 @@ class LockOverlayActivity : FlutterActivity() {
         // Just finish - the protected app should still be in the background
         finish()
     }
-
-    /**
-     * Prevent task from being killed when user swipes away.
-     */
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // Don't allow task removal while lock screen is showing
-        super.onTaskRemoved(rootIntent)
-    }
 }
