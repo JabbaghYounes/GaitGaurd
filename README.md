@@ -9,7 +9,6 @@ A Flutter-based biometric security application that uses gait recognition to aut
 - [Folder Structure](#folder-structure)
 - [Local-Only Security Model](#local-only-security-model)
 - [Gait ML Pipeline](#gait-ml-pipeline)
-- [SQLite Schema](#sqlite-schema)
 - [Running the App](#running-the-app)
 - [Running Tests](#running-tests)
 - [MVP Limitations](#mvp-limitations)
@@ -352,158 +351,20 @@ Location: Application Documents Directory
                       └─────────────────────┘
 ```
 
-### Table Schemas
-
-#### users
-```sql
-CREATE TABLE users(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### profiles
-```sql
-CREATE TABLE profiles(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER UNIQUE NOT NULL,
-  first_name TEXT,
-  last_name TEXT,
-  display_name TEXT,
-  bio TEXT,
-  phone_number TEXT,
-  date_of_birth TEXT,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-#### calibration_sessions
-```sql
-CREATE TABLE calibration_sessions(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  type TEXT NOT NULL,              -- 'Fast', 'Standard', 'Extended'
-  status TEXT NOT NULL,            -- 'active', 'completed', 'error'
-  start_time TEXT NOT NULL,
-  end_time TEXT,
-  expected_duration_ms INTEGER,
-  reading_count INTEGER DEFAULT 0,
-  quality_score REAL DEFAULT 0.0,
-  error_message TEXT,
-  metadata TEXT,                   -- JSON blob
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-#### calibration_readings
-```sql
-CREATE TABLE calibration_readings(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id INTEGER NOT NULL,
-  timestamp TEXT NOT NULL,
-  accel_x REAL NOT NULL,
-  accel_y REAL NOT NULL,
-  accel_z REAL NOT NULL,
-  gyro_x REAL NOT NULL,
-  gyro_y REAL NOT NULL,
-  gyro_z REAL NOT NULL,
-  is_synchronized INTEGER DEFAULT 1,
-  FOREIGN KEY (session_id) REFERENCES calibration_sessions (id) ON DELETE CASCADE
-);
-```
-
-#### ml_models
-```sql
-CREATE TABLE ml_models(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  model_type TEXT NOT NULL,        -- 'heuristic', 'ml'
-  model_version TEXT NOT NULL,
-  model_path TEXT,
-  is_active INTEGER DEFAULT 1,
-  accuracy REAL,
-  performance REAL,
-  metadata TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-#### recognition_results
-```sql
-CREATE TABLE recognition_results(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  model_id INTEGER,
-  features TEXT,                   -- JSON serialized GaitFeatures
-  is_match INTEGER NOT NULL,
-  confidence REAL NOT NULL,
-  pattern_type TEXT NOT NULL,
-  recognition_timestamp TEXT NOT NULL,
-  metadata TEXT,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-  FOREIGN KEY (model_id) REFERENCES ml_models (id) ON DELETE SET NULL
-);
-```
-
-#### protected_apps
-```sql
-CREATE TABLE protected_apps(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  package_name TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  icon_code_point INTEGER,
-  is_protected INTEGER DEFAULT 0,
-  is_locked INTEGER DEFAULT 0,
-  last_unlock_time TEXT,
-  lock_count INTEGER DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(user_id, package_name),
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-#### app_lock_sessions
-```sql
-CREATE TABLE app_lock_sessions(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  package_name TEXT NOT NULL,
-  lock_status TEXT NOT NULL,       -- 'locked', 'unlocked', 'authenticating'
-  locked_at TEXT NOT NULL,
-  unlocked_at TEXT,
-  unlock_confidence REAL,
-  unlock_attempts INTEGER DEFAULT 0,
-  metadata TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-#### training_data
-```sql
-CREATE TABLE training_data(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  model_id INTEGER,
-  features TEXT NOT NULL,          -- JSON serialized GaitFeatures
-  created_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-  FOREIGN KEY (model_id) REFERENCES ml_models (id) ON DELETE SET NULL
-);
-```
-
 ---
 
 ## Running the App
 
-### Prerequisites
+### Quick Start (Sideload APK)
+
+If you just want to try the app, you can download and sideload the pre-built APK:
+
+1. Download the latest APK from the [Releases](https://github.com/YOUR_USERNAME/GaitGuard/releases) page
+2. On your Android device, enable "Install from unknown sources" in Settings
+3. Transfer the APK to your device and install it
+4. Grant the required permissions when prompted
+
+### Prerequisites (For Development)
 
 - Flutter SDK 3.10.3 or higher
 - Android Studio / Xcode (for emulators)
@@ -551,6 +412,8 @@ flutter build appbundle
 # iOS (requires macOS)
 flutter build ios
 ```
+
+The built APK will be located at `build/app/outputs/flutter-apk/app-release.apk`.
 
 ### Environment Notes
 
@@ -718,10 +581,15 @@ The current implementation is a Minimum Viable Product with the following limita
 
 ## License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
 ## Contributing
 
-[Add contribution guidelines here]
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+
+- Reporting bugs and suggesting features
+- Development setup and guidelines
+- Code style and architecture patterns
+- Pull request process
